@@ -1,0 +1,6 @@
+# storage/ NO debe ser accesible por web: las imágenes se sirven solo a través de
+# GET /media/{id}/{grande|mini} (front controller en public/), que valida permisos
+# y envía Content-Type desde la BD. Esta regla es defensa en profundidad por si
+# alguien publica esta carpeta por error (Alias, DocumentRoot mal configurado).
+Require all denied
+Options -Indexes -ExecCGI

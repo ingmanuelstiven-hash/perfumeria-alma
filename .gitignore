@@ -1,0 +1,33 @@
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+config/local.php
+*.pem
+*.key
+
+# Subidas de usuarios (solo se versiona la estructura)
+storage/uploads/*
+public/uploads/*
+!storage/uploads/.gitkeep
+!public/uploads/.gitkeep
+
+# Backups y volcados de BD
+backups/
+*.sql.gz
+*.bak
+
+# Dependencias y logs
+vendor/
+node_modules/
+logs/
+*.log
+
+# Claude Code (local)
+.claude/settings.local.json
+
+# SO / editores
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

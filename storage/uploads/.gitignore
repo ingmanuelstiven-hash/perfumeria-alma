@@ -1,0 +1,6 @@
+# Los archivos subidos no van a Git (se respaldan con la copia de storage/uploads).
+*
+!.gitignore
+!.htaccess
+!*/
+!*/.gitkeep
