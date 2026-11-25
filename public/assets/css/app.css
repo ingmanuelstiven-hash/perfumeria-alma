@@ -1,0 +1,43 @@
+/* Estilos mínimos (archivo local: la CSP no admite estilos en línea). */
+:root { --tinta: #1f1d2b; --suave: #6b6880; --acento: #6b3fa0; --fondo: #f6f4f8; --error: #a4161a; --ok: #1b6b3a; }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--tinta); background: var(--fondo); }
+.barra { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; justify-content: space-between; padding: .75rem 1rem; background: #fff; border-bottom: 1px solid #e4e0ea; }
+.barra nav { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+.marca { font-weight: 700; color: var(--acento); text-decoration: none; }
+main { padding: 1rem; }
+.tarjeta { background: #fff; border: 1px solid #e4e0ea; border-radius: 8px; padding: 1.25rem; margin: 0 auto 1rem; max-width: 960px; }
+.estrecha { max-width: 420px; }
+label { display: block; margin-top: .75rem; font-weight: 600; }
+input, select { width: 100%; padding: .5rem; font: inherit; border: 1px solid #b9b4c4; border-radius: 4px; }
+.en-linea { display: inline-flex; gap: .25rem; align-items: center; margin: .15rem; }
+.en-linea select { width: auto; }
+button { margin-top: .75rem; padding: .5rem 1rem; font: inherit; color: #fff; background: var(--acento); border: 0; border-radius: 4px; cursor: pointer; }
+.en-linea button, .barra button { margin-top: 0; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid #f2b705; outline-offset: 2px; }
+.alerta { color: var(--error); border-left: 4px solid var(--error); padding: .5rem .75rem; background: #fdf0f0; }
+.ok { color: var(--ok); border-left: 4px solid var(--ok); padding: .5rem .75rem; background: #eef8f1; }
+.aviso { border-left: 4px solid #f2b705; padding: .5rem .75rem; background: #fff8e1; }
+.nota { color: var(--suave); font-size: .9rem; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: .4rem; border-bottom: 1px solid #eee; vertical-align: top; }
+.permisos { columns: 2; }
+.oculto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+dt { font-weight: 600; }
+dd { margin: 0 0 .5rem; }
+
+/* Sprint 1B: catálogo */
+.error-campo { display: block; color: var(--error); font-size: .9rem; }
+input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: var(--error); }
+textarea { width: 100%; padding: .5rem; font: inherit; border: 1px solid #b9b4c4; border-radius: 4px; min-height: 5rem; }
+fieldset { border: 1px solid #e4e0ea; border-radius: 6px; margin: 1rem 0 0; padding: .5rem 1rem 1rem; }
+legend { font-weight: 600; padding: 0 .4rem; }
+.filtros { display: flex; flex-wrap: wrap; gap: .75rem; align-items: flex-end; }
+.filtros > div { flex: 1 1 10rem; }
+.paginacion { display: flex; gap: 1rem; align-items: center; margin-top: 1rem; }
+.casilla { display: flex; gap: .5rem; align-items: center; font-weight: 400; }
+.casilla input { width: auto; }
+.inactivo { color: var(--suave); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.enlaces { display: flex; flex-wrap: wrap; gap: .75rem; margin: .5rem 0; }
+.ancha { max-width: 960px; }

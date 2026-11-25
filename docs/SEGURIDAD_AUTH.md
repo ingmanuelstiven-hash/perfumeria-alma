@@ -6,9 +6,9 @@ Alcance: aplicación PHP 8.2+ renderizada en servidor (htmx/Alpine opcional), ex
 
 | Pieza | Diseño |
 |---|---|
-| Access token | JWT **HS256**, vida **10 min**, firmado con `JWT_SECRET` (≥ 32 bytes aleatorios, en `.env`). Claims: `iss`, `aud`, `sub` (usuario_id), `rol`, `suc` (sucursal_id), `sid` (familia de sesión), `ver` (`usuarios.token_version`), `jti` (16 bytes aleatorios), `iat`, `nbf`, `exp`. Cabecera `kid` para rotar claves |
-| Transporte | Cookie `__Host-at`: `HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=600`. **Nunca** en `localStorage`/`sessionStorage` ni en la URL |
-| Refresh token | 32 bytes aleatorios (`random_bytes`), opaco (no es JWT). En BD solo su `SHA-256` (`refresh_tokens.token_hash`). Cookie `__Secure-rt`: `HttpOnly; Secure; SameSite=Strict; Path=/auth/`. Inactividad: 2 h; tope absoluto de la sesión (`sesion_expira_en`): 12 h (un turno) |
+| Access token | JWT **HS256**, vida **10 min**, firmado con `JWT_SECRET` (≥ 32 bytes aleatorios, en `.env`). Claims: `iss`, `aud`, `sub` (usuario_id), `rol`, `sid` (familia de sesión), `tv` (`usuarios.token_version`), `jti` (16 bytes aleatorios), `iat`, `nbf`, `exp`. Cabecera `kid` (huella de la clave) para rotar claves con `JWT_SECRET_ANTERIOR`. *(S1A: `tv` en lugar de `ver` y sin `suc`: la sucursal se lee de la BD en la misma consulta de cada petición, ver §11)* |
+| Transporte | Cookie `__Host-at`: `HttpOnly; Secure; SameSite=Strict; Path=/`. **Nunca** en `localStorage`/`sessionStorage` ni en la URL. *(S1A: `Max-Age` = lo que le queda a la sesión, no 600: el JWT sigue durando 10 min, pero así el servidor distingue "expirado" de "sin sesión" y puede ofrecer la renovación y el logout; §11)* |
+| Refresh token | 32 bytes aleatorios (`random_bytes`), opaco (no es JWT). En BD solo su `SHA-256` (`refresh_tokens.token_hash`). Cookie `__Secure-rt`: `HttpOnly; Secure; SameSite=Strict; Path=/auth/refresh` *(S1A: solo viaja a ese endpoint)*. Inactividad: 2 h; tope absoluto de la sesión (`sesion_expira_en`): 12 h (un turno) |
 | Rotación | Cada uso del refresh lo marca `usado_en`, crea otro en la misma `familia_id` y enlaza `reemplazado_por` |
 | Reutilización | Si llega un refresh **ya usado** (fuera de la ventana de gracia de 10 s) se revoca toda la familia (`motivo_revocacion='reutilizacion'`), se registra en `auditoria` y se avisa al admin |
 | Revocación | `jwt_revocados(jti)` para cerrar **una** sesión antes de que expire su access token; `usuarios.token_version++` para cerrar **todas** (cambio de contraseña, desactivación, cambio de rol) |
@@ -38,7 +38,7 @@ Alcance: aplicación PHP 8.2+ renderizada en servidor (htmx/Alpine opcional), ex
 
 ## 2. Flujos
 
-### 2.1 Login (`POST /auth/login`)
+### 2.1 Login (`POST /login`)
 1. Verificar Origin y CSRF previo a la sesión (cookie `__Host-csrf` con `sid="anon"`).
 2. Rate limit: 5 intentos / 15 min por **usuario** y 20 / 15 min por **IP** (`limites_tasa`, `login_intentos`). Al superarlo: respuesta 429 genérica y `usuarios.bloqueado_hasta`.
 3. Buscar el usuario. Si no existe, ejecutar igual `password_verify` contra un hash ficticio (tiempo constante). Mensaje único: "Usuario o contraseña incorrectos".
@@ -61,8 +61,8 @@ Alcance: aplicación PHP 8.2+ renderizada en servidor (htmx/Alpine opcional), ex
    - fuera de la gracia: **reutilización**. Se revoca la familia, se meten en `jwt_revocados` los jti activos conocidos, se audita y se responde 401.
 4. Si es válido: marcarlo `usado_en`, crear el sucesor (misma familia, `expira_en = ahora + 2 h` pero nunca más allá de `sesion_expira_en`), enlazar `reemplazado_por`, emitir un access token nuevo y rotar el CSRF. Todo en una transacción.
 
-### 2.4 Logout (`POST /auth/logout`, con CSRF)
-Revocar la familia (`motivo='logout'`), insertar el `jti` actual en `jwt_revocados` hasta su `exp` y borrar las tres cookies (`Max-Age=0`). Auditar.
+### 2.4 Logout (`POST /logout`, con CSRF)
+Revocar la familia (`motivo='logout'`), insertar el `jti` actual en `jwt_revocados` hasta su `exp` y borrar las tres cookies (`Max-Age=0`). Auditar. *(S1A: la familia se toma del `sid` del access token, aceptando uno expirado si su firma es válida, porque la cookie del refresh no llega a `/logout`.)*
 
 ### 2.5 Cambio o restablecimiento de contraseña, desactivación, cambio de rol
 `token_version++`, revocar **todas** las familias del usuario y auditar. Las sesiones quedan inválidas en la siguiente petición, ya que la versión se comprueba siempre.
@@ -139,7 +139,7 @@ Las migraciones se ejecutan con un usuario administrador distinto, nunca con `pe
 ## 4. CSRF
 
 Las cookies con `SameSite=Strict` ya bloquean la mayoría de CSRF, pero no cubren subdominios hermanos ni navegadores antiguos. Se añaden dos capas:
-1. **Doble envío firmado:** `csrf = base64url(r) . "." . base64url(HMAC-SHA256(CSRF_SECRET, sid . r))` en la cookie `__Host-csrf` (sin HttpOnly, `SameSite=Strict`). La página lo expone en `<meta name="csrf-token">`; htmx lo envía como cabecera `X-CSRF-Token` (`hx-headers`) y los formularios clásicos en un campo oculto. El servidor exige que coincida con la cookie y que el HMAC sea válido para el `sid` del JWT, comparando con `hash_equals`. Un atacante que logre plantar una cookie no puede generar un token válido para otra sesión.
+1. **Doble envío firmado:** `csrf = base64url(r) . "." . base64url(HMAC-SHA256(CSRF_SECRET, sid . r))` en la cookie `__Host-csrf` (`SameSite=Strict`; *S1A: también HttpOnly, ya que el servidor incrusta el valor en la página y ningún script necesita leer la cookie*). La página lo expone en `<meta name="csrf-token">`; htmx lo envía como cabecera `X-CSRF-Token` (`hx-headers`) y los formularios clásicos en un campo oculto. El servidor exige que coincida con la cookie y que el HMAC sea válido para el `sid` del JWT, comparando con `hash_equals`. Un atacante que logre plantar una cookie no puede generar un token válido para otra sesión.
 2. **Origin/Fetch Metadata:** rechazar métodos no seguros si `Origin` no es `APP_URL`, o si `Sec-Fetch-Site` no es `same-origin`/`none`.
 
 Ningún GET cambia estado (tampoco el refresh ni el logout).
@@ -236,3 +236,44 @@ Extra: validación de entrada por esquema (tipos, rangos, longitudes) antes de l
 7. **Hosting compartido:** aislamiento dudoso entre clientes y posible falta del privilegio `TRIGGER`. Se recomienda un VPS.
 8. El `sql_mode` global de XAMPP es permisivo: si una conexión olvida fijarlo, MariaDB trunca datos sin error. `Db.php` debe fijarlo siempre y un test debe comprobarlo.
 9. Los lectores de código de barras USB son teclados: cualquiera con acceso físico al POS puede "teclear" códigos. Es un riesgo físico, cubierto por la sesión, los permisos y la auditoría.
+
+## 11. Implementación Sprint 1A: diferencias con este documento
+
+Código: `public/index.php` (front controller), `src/App.php` (kernel y rutas), `src/Http/*` (router mínimo propio), `src/Security/*`, `src/Services/{AuthService,UsuarioService,Permisos,Auditoria}.php`, `src/Middleware/Mw.php`. Pruebas: `php tests/run.php` (BD temporal `perfu_s1a_test`).
+
+| Tema | Diseño original | Implementado | Motivo |
+|---|---|---|---|
+| Rutas | `/auth/login`, `/auth/logout` | `POST /login`, `POST /logout`, `POST /auth/refresh` | Decisión del Sprint 1A. El refresh queda aislado en su propia ruta |
+| Cookie del refresh | `Path=/auth/` | `Path=<base>/auth/refresh` | Mínima exposición: solo viaja al endpoint que la usa |
+| Cookie del access | `Max-Age=600` | `Max-Age` = resto de la sesión (≤ 12 h); el JWT sigue con `exp` de 10 min | Con 600 s el navegador la borra y el servidor no puede distinguir "expirado" (ofrecer renovación, cerrar la familia en logout) de "sin sesión" |
+| Claims | `ver`, `suc` | `tv`, sin `suc` | `sucursal_id` se lee de la BD en la consulta por petición, que ya se hace; un claim más no ahorra nada |
+| Revocación de una sesión | `jwt_revocados` | `jwt_revocados` **y** comprobación de que la familia (`sid`) sigue viva en `refresh_tokens` | La BD no guarda qué `jti` emitió cada refresh, así que tras una reutilización no se pueden listar "los jti activos". Comprobar la familia en la misma consulta corta al instante todos los access de esa sesión |
+| Cookie CSRF | sin HttpOnly | HttpOnly | El token se incrusta en `<meta>` y en campos ocultos desde el servidor; ningún script lee la cookie |
+| Rotación del CSRF | en cada refresh | en login y cambio de contraseña (nuevo `sid`), no en el refresh | El token va atado al `sid`, que no cambia al rotar; rotarlo rompería los formularios abiertos en otras pestañas sin ganar seguridad |
+| CSRF del refresh/logout | — | refresh: atado a la familia del refresh (se busca sin bloqueo antes de rotar); logout: al `sid` del access, aunque esté expirado | Esas rutas no siempre tienen un access válido |
+| Bloqueo por usuario | por usuario | por el **texto tecleado** normalizado (`limites_tasa`, clave `login_u\|texto`); `usuarios.bloqueado_hasta`/`intentos_fallidos` son un reflejo para el admin | Así un usuario inexistente se bloquea igual que uno real: el 429 no revela si existe |
+| Orden del rate limit | contar el fallo después | el intento se **reserva** (incremento atómico) antes de verificar la clave | Una ráfaga en paralelo no puede evaluar más de 5 contraseñas (probado) |
+| Límites | 5/usuario y 20/IP en 15 min | igual (`config.login_max_intentos`, `login_bloqueo_minutos`; `LOGIN_MAX_INTENTOS_IP`), y `/auth/refresh` 60/min por IP (`REFRESH_MAX_POR_MINUTO`). Un login correcto no consume cupo de la IP | Una tienda detrás de una sola IP no debe bloquearse por los aciertos de sus empleados |
+| Bloqueo vigente | — | se responde 429 **sin** calcular ningún hash | Evita que el bloqueo amplifique un DoS (Argon2id usa 64 MiB por verificación) |
+| Secretos | ≥ 32 bytes | hexadecimal de ≥ 64 caracteres, distintos entre sí; si no, la app no arranca | Es la única forma de comprobar la longitud real en bytes |
+| HTTPS | obligatorio | producción: `APP_URL` https o no arranca; petición http → 301 (GET) / 400 (resto). `Host` debe ser el de `APP_URL` | — |
+| HTTP local | "no se relajan las cookies" | `APP_ENV=local` + petición http + `APP_URL` de loopback (`localhost`, `127.0.0.1`, `[::1]`): cookies `at`/`rt`/`csrf` sin `Secure` ni prefijo. Por IP de LAN sin HTTPS: 403 | Algunos navegadores no fijan `Secure`/`__Host-` en `http://localhost`. En modo seguro **solo** se leen los nombres con prefijo |
+| CSP | con `upgrade-insecure-requests` | solo si la petición es HTTPS (igual que HSTS) | Sobre `http://127.0.0.1` el navegador pediría la CSS por https y la página quedaría sin estilos |
+| Aviso al admin por reutilización | aviso | solo registro en `auditoria` (`sesion.refresh_reutilizado`) | Notificaciones fuera del alcance de 1A |
+| Cambio de contraseña | revoca todo | revoca todo y abre una sesión nueva para el dispositivo actual | El usuario no es expulsado del equipo donde acaba de cambiarla |
+| `debe_cambiar_password=1` | único permiso: cambiar la clave | permisos efectivos vacíos; `/` redirige a `/cuenta/password` | — |
+
+**Riesgos de esta implementación (además de §10):**
+1. **Modo local sin `Secure`:** en `APP_ENV=local` sobre http, las cookies viajan en claro por la interfaz de loopback y no llevan prefijo. Es aceptable solo porque el tráfico no sale del equipo. Si un servidor de producción se arrancara por error con `APP_ENV=local` y `APP_URL` de loopback, sería accesible solo desde ese mismo equipo (el Host debe coincidir), pero sin las garantías de los prefijos. **No usar `APP_ENV=local` fuera de un equipo de desarrollo.**
+2. **Ventana de gracia de 10 s** (§10.4): probada con 4 procesos simultáneos. Responde 409 y no entrega tokens, así que un atacante que use un refresh robado durante la gracia no obtiene nada; si lo usa después, se detecta y se revoca la familia.
+3. **IP = `REMOTE_ADDR`:** detrás de un proxy inverso todas las peticiones compartirían IP. Hoy no se confía en `X-Forwarded-For`. Si se añade un proxy, hay que configurar una lista de proxies de confianza.
+4. **Tiempo constante:** el hash ficticio usa los parámetros por defecto de Argon2id. Si se cambian los parámetros de `password_hash`, hay que regenerarlo (`src/Security/Passwords.php`). En la prueba, la mediana fue de unos 200 ms en ambos casos.
+5. **Detección de la carrera del refresh:** la gracia se mide con `DATETIME` (resolución de 1 s).
+
+## 12. Sprint 1B: autorización y datos de costo
+
+- **Matriz** (códigos reales de `permisos`): `articulos.ver` lee el catálogo; `inventario.ver` añade existencias; `inventario.ver_costos` añade costo promedio y último costo; `articulos.gestionar` crea/edita/desactiva ítems, recipientes, marcas y categorías; un saldo inicial exige además `inventario.ajustar`. Por rol sembrado: admin todo; empleado `articulos.ver` + `inventario.ver` (sin costos, no muta); contador `articulos.ver` + `inventario.ver` + `inventario.ver_costos` (solo lectura).
+- **Costos:** `ArticuloService` arma el SELECT según los permisos recibidos; sin `inventario.ver_costos` las columnas de costo no se consultan, así que no pueden aparecer en HTML, JSON ni errores. Las plantillas también condicionan el encabezado. La auditoría de 1B no guarda costos (quedan en el libro de movimientos).
+- **Mutaciones:** `autenticar -> csrf -> permiso` en cada ruta POST; entradas de formulario y JSON pasan por la misma validación del servicio; los parámetros no escalares se ignoran.
+- **Búsqueda:** consultas preparadas; los comodines `%` y `_` del texto buscado se escapan; filtros fuera de lista se ignoran.
+- **Riesgo residual:** la edición reemplaza todos los campos (un cliente JSON que omita `marca_id` la borra). El formulario HTML siempre los envía.

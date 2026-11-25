@@ -355,3 +355,19 @@ $M < database/seeds/0001_seed_base.sql
 $M < database/seeds/0002_seed_archivos.sql
 ```
 Usuarios de mínimo privilegio: `database/scripts/usuarios_bd.sql`. Por defecto solo lista los `CREATE USER`/`GRANT` que haría; con `--init-command="SET @ejecutar=1"` los aplica. Crea `perf_app`, `perf_catalogo` y `perf_backup` **bloqueados y sin contraseña**; la contraseña se pone a mano en el cliente interactivo (`ALTER USER ... IDENTIFIED BY ... ACCOUNT UNLOCK`) y se guarda solo en `.env`. Re-ejecutarlo tras cada migración que cree tablas. Las vistas usan `SQL SECURITY DEFINER` con el usuario que ejecutó la migración: no borrar esa cuenta. Si la app conecta por `127.0.0.1` (TCP) y el servidor tiene `skip-name-resolve`, crear también las cuentas `@'127.0.0.1'`.
+
+## 12. Implementación Sprint 1B: catálogo de inventario (diferencias y decisiones)
+
+Código: `src/Services/{ArticuloService,RecipienteService,CatalogosService,InventarioService,SkuService}.php`, `src/Support/{Decimal,Entrada}.php`, controladores `ArticulosController`, `RecipientesController`, `CatalogosController`. Sin cambios de esquema (no hay migración 0003).
+
+| Tema | Diseño original | Implementado | Motivo |
+|---|---|---|---|
+| SKU autogenerado | `ESE-000123`, `PRD-`... con "la secuencia del consecutivo SKU" | Una sola secuencia compartida por todos los tipos (fila `consecutivos` tipo `SKU` de la sucursal de menor id) con prefijo por tipo; bloqueo `SELECT ... FOR UPDATE` en la misma transacción del alta; si el SKU siguiente ya existe (tecleado a mano) se salta | El ENUM `consecutivos.tipo` solo tiene un valor `SKU`; una secuencia por tipo de artículo exigiría migración. Los SKU son únicos en todo el sistema, por eso no se usa el consecutivo de la sucursal del usuario. Cada prefijo ve saltos (ESE-1, PRD-2, ESE-3); la secuencia global no tiene huecos |
+| Saldo inicial | "alta con saldo inicial como movimiento" | Productos/envases/insumos: movimiento `saldo_inicial` en `movimientos_inventario` en la sucursal del actor. Esencias: solo al crear un recipiente (`movimientos_esencia`, gramos) | En esencias el saldo vive en recipientes (§3 decisión 3); un saldo sin recipiente rompería `v_control_existencias_esencia` |
+| Costo del saldo inicial | — | `existencias.costo_promedio` = promedio ponderado calculado por MariaDB (`CAST ... AS DECIMAL`, sin float) y `ultimo_costo` = costo del asiento | El costo no vive en `articulos`; las columnas de costo solo se SELECCIONAN con `inventario.ver_costos` |
+| Código de recipiente | `R-000045` | `R-` + id (se inserta con un código temporal y se renombra en la misma transacción). Los códigos manuales `R-<dígitos>` se rechazan | `consecutivos.tipo` no tiene valor para recipientes (requeriría migración) |
+| Tipo, SKU y unidad | — | Inmutables si hay historia: filas en cualquier tabla con FK al artículo o a su esencia (lista `ArticuloService::REFERENCIAS_*`, vigilada por un test contra `information_schema`) o existencias ≠ 0 | Cambiar el tipo reasigna el subtipo y rompería recetas, ventas y kardex |
+| Permisos | — | Lectura `articulos.ver` (existencias `inventario.ver`, costos `inventario.ver_costos`); escritura `articulos.gestionar`; saldo inicial además `inventario.ajustar` + `inventario.ver_costos`. Marcas y categorías usan los mismos | No se crean permisos nuevos |
+| Borrado | lógico | `articulos.activo`, `marcas.activa`, `categorias.activa`, `recipientes_esencia.estado='baja'`. No se desactiva un artículo con `cantidad_reservada` > 0 ni se da de baja un recipiente con gramos | — |
+
+Pendiente para otros sprints: crear las filas de `existencias` de los artículos existentes cuando se active una sucursal nueva (hoy `InventarioService::bloquearExistencia` las crea al primer uso), `proveedor_preferido_id` de la esencia (no hay CRUD de proveedores hasta el Sprint 4), y `marcas.logo_archivo_id` / `categorias.imagen_archivo_id` (1C).

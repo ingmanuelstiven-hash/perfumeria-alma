@@ -1,0 +1,14 @@
+{
+    "name": "perfumeria/alma",
+    "description": "Sistema de perfumeria",
+    "type": "project",
+    "authors": [
+        {
+            "name": "ingmanuelstiven-hash",
+            "email": "ingmanuelstiven@gmail.com"
+        }
+    ],
+    "require": {
+        "firebase/php-jwt": "^7.2"
+    }
+}

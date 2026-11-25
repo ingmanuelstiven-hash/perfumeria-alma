@@ -1,0 +1,3 @@
+# Niega el acceso web a todo el proyecto (Apache 2.4).
+# Solo la carpeta public/ debe ser servida como DocumentRoot.
+Require all denied
